@@ -26,6 +26,13 @@ const ParsedTypes = {
     NONE: 'none'
 }
 
+const ParseEngines = {
+    CSHARP: 'csharp',
+    CSHARP_WRAPPER: 'csharp_w',
+    TYPESCRIPT: 'typescript',
+    JAVASCRIPT: 'javascript'
+}
+
 class ParsedField {
     constructor(type, innerType, name) {
         this.type = type;
@@ -34,28 +41,96 @@ class ParsedField {
     }
 
     toComparableString() {
-        return `-${this.name}-${this.type}-${this.innerType ? this.innerType : ParsedTypes.NONE}-`;
+        return `-${this.name.toLowerCase()}-${this.type.toLowerCase()}-${this.innerType ? this.innerType.toLowerCase() : ParsedTypes.NONE}-`;
     }
 }
 
-class ParsedClassPool {
-    constructor() {
-        this.classes = [];
+const EngineCsharp = {
+    classHeader: (className) => {
+        return 'public class ' + className + ' {\n\n';
+    },
+    classFields: (fields) => {
+
+        let fieldBody = '';
+        fields.forEach(field => {
+            fieldBody += `\tpublic ${EngineCsharp.getType(field)} ${ field.type !== ParsedTypes.ARRAY ? checkSnakeCase(field.name, true) : checkSnakeCase(arrayName(field.name), true)}  {get; set;}\n`;
+        })
+
+        return fieldBody;
+    },
+    classBottom: () => {
+        return '\n}\n\n';
+    },
+    getType: (field) => {
+
+        let resType = '';
+
+        switch (field.type) {
+
+            default:
+            case ParsedTypes.STRING:
+                resType = 'string'
+                break;
+            case ParsedTypes.BOOLEAN:
+                resType = 'bool'
+                break;
+            case ParsedTypes.CHAR:
+                resType = 'char'
+                break;
+            case ParsedTypes.DATE:
+                resType = 'Date'
+                break;
+            case ParsedTypes.DOUBLE:
+                resType = 'double'
+                break;
+            case ParsedTypes.FLOAT:
+                resType = 'float'
+                break;
+            case ParsedTypes.LONG:
+                resType = 'long'
+                break;
+            case ParsedTypes.INTEGER:
+                resType = 'int'
+                break;
+            case ParsedTypes.NONE:
+                resType = field.innerType;
+                break;
+            case ParsedTypes.ARRAY:
+                resType = `List<${field.innerType}>`
+                break;
+
+        }
+
+        return resType;
+
     }
 
-    compareFields(targetClass) {
+}
 
-        let res = '';
-        const comp = targetClass.fields.map(f => f.toComparableString());
-        this.classes.forEach(c => {
-            const base = c.fields.map(f => f.toComparableString());
-            if (!res && comp.filter(field => base.includes(field)).length === targetClass.fields.length) {
-                res = c.className;
-            }
-        });
+const classPool = [];
+const compareFields = (targetClass) => {
 
-        return res;
-    }
+    let res = '';
+    
+    const comp = targetClass.fields.map(f => f.toComparableString());
+    classPool.forEach(c => {
+        const base = c.fields.map(f => f.toComparableString());
+        if (!res && comp.filter(field => base.includes(field)).length === targetClass.fields.length) {
+            res = c.className;
+        }
+    });
+
+    return res;
+};
+
+const generate = (engine) => {
+    let generated = '';
+
+    classPool.forEach(c => {
+        generated += c.build(engine);
+    });
+
+    return generated;
 }
 
 class ParsedClass {
@@ -66,13 +141,30 @@ class ParsedClass {
     }
 
     // TODO refac, if a class arealdy exists 
-    compareFields(targetFields) {
-        const comparison = Object.assign(this.fields);
-        let target = Object.assign(targetFields);
-        target = target.map(f => f.toComparableString());
+    build(engine) {
+        const buildEngine = getEngine(engine);
+        let resultClass = '';
 
-        return comparison.map(f => f.toComparableString()).filter(field => target.includes(field)).length === this.fields.length;
+        resultClass += buildEngine.classHeader(this.className);
+        resultClass += buildEngine.classFields(this.fields);
+        resultClass += buildEngine.classBottom();
+
+
+        return resultClass;
+
     }
+
+}
+
+const getEngine = (engine) => {
+
+
+    switch (engine) {
+        default:
+        case ParseEngines.CSHARP:
+            return EngineCsharp;
+    }
+
 
 }
 
@@ -82,6 +174,10 @@ const capitalizeString = (s) => {
 
 const uncapitalizeString = (s) => {
     return s.charAt(0).toLowerCase() + s.slice(1);
+}
+
+const arrayName = (s) => {
+    return s.toLowerCase().endsWith('s') ? s : s + 's';
 }
 
 const checkSnakeCase = (s, captalize) => {
@@ -112,15 +208,11 @@ const isSubClassClash = (subClasses, newClass) => {
     return subClasses.some(s => s.includes(newClassParts[1]));
 }
 
-const classPool = new ParsedClassPool();
 
-const parse = (jsonTarget, resultClassName, language) => {
-    const subClasses = [];
-
+const parse = (jsonTarget, resultClassName) => {
     const parsedClass = new ParsedClass();
-    parsedClass.className = resultClassName;
+    parsedClass.className = checkSnakeCase(resultClassName, true);
 
-    let resultClass = 'public class ' + checkSnakeCase(resultClassName, true) + ' {\n';
     const objKeys = Object.keys(jsonTarget);
     objKeys.forEach(key => {
         let val = typeof jsonTarget[key];
@@ -134,62 +226,57 @@ const parse = (jsonTarget, resultClassName, language) => {
             val = 'array';
         }
 
-        console.log(val);
         const varName = checkSnakeCase(key, false);
         switch (val) {
             case 'number':
 
                 if (varVal.toString().includes('.') || varVal.toString().includes(',')) {
-                    resultClass += '\n public double ' + varName + ' {get; set;}';
-                    parsedClass.fields.push(new ParsedField(ParsedTypes.DOUBLE, ParsedTypes.NONE, varName));
-
-                    // TODO check float
+                    if (varVal.toString().includes('f')) {
+                        parsedClass.fields.push(new ParsedField(ParsedTypes.FLOAT, ParsedTypes.NONE, varName));
+                    } else {
+                        parsedClass.fields.push(new ParsedField(ParsedTypes.DOUBLE, ParsedTypes.NONE, varName));
+                    }
                 } else {
                     if (varVal.toString().length > 8) {
-                        resultClass += '\n public long ' + varName + ' {get; set;}';
-                        parsedClass.fields.push(new ParsedField(ParsedTypes.DOUBLE, ParsedTypes.LONG, varName));
+                        parsedClass.fields.push(new ParsedField(ParsedTypes.LONG, ParsedTypes.NONE, varName));
                     } else {
-                        resultClass += '\n public int ' + varName + ' {get; set;}';
-                        parsedClass.fields.push(new ParsedField(ParsedTypes.DOUBLE, ParsedTypes.INTEGER, varName));
+                        parsedClass.fields.push(new ParsedField(ParsedTypes.INTEGER, ParsedTypes.NONE, varName));
                     }
                 }
 
 
                 break;
             case 'boolean':
-                resultClass += '\n public bool ' + varName + ' {get; set;}';
                 parsedClass.fields.push(new ParsedField(ParsedTypes.BOOLEAN, ParsedTypes.NONE, varName));
                 break;
             default:
             case 'string':
                 if (varVal && varVal.length === 1) {
-                    resultClass += '\n public char ' + varName + ' {get; set;}';
                     parsedClass.fields.push(new ParsedField(ParsedTypes.CHAR, ParsedTypes.NONE, varName));
                 } else {
-                    resultClass += '\n public string ' + varName + ' {get; set;}';
                     parsedClass.fields.push(new ParsedField(ParsedTypes.STRING, ParsedTypes.NONE, varName));
                 }
 
                 break;
             case 'date':
-                resultClass += '\n public Date ' + varName + ' {get; set;}';
                 parsedClass.fields.push(new ParsedField(ParsedTypes.DATE, ParsedTypes.NONE, varName));
                 break;
             case 'object':
-                const newElement = parse(jsonTarget[key], key, language);
-                const clashCheck = classPool.compareFields(newElement);
+
+                const newElement = parse(jsonTarget[key], key);
+                const clashCheck = compareFields(newElement);
                 let fieldType = newElement.className;
 
                 if (!clashCheck) {
-                    classPool.classes.push(newElement);
+                    classPool.push(newElement);
                 } else {
                     fieldType = clashCheck;
                 }
 
-                parsedClass.fields.push(new ParsedField(fieldType, ParsedTypes.NONE, varName));
-                resultClass += '\n public ' + checkSnakeCase(key, true) + ' ' + varName + ' {get; set;}';
+                parsedClass.fields.push(new ParsedField(ParsedTypes.NONE, fieldType, varName));
                 break;
             case 'array':
+
                 let arrayType = 'string';
 
                 if (jsonTarget[key].length > 0) {
@@ -197,38 +284,37 @@ const parse = (jsonTarget, resultClassName, language) => {
                     arrayType = typeof jsonTarget[key][0];
 
                     if (val === 'object' && typeof jsonTarget[key].getMonth === 'function') {
+
                         arrayType = 'Date';
+
                     } else if (arrayType == 'object') {
-                        const newElement = parse(jsonTarget[key][0], arrayType, language);
-                        const clashCheck = classPool.compareFields(newElement);
+                        const newElement = parse(jsonTarget[key][0], arrayType);
+                        const clashCheck = compareFields(newElement);
                         arrayType = newElement.className;
                         if (!clashCheck) {
-                            classPool.classes.push(newElement);
+                            classPool.push(newElement);
                         } else {
                             arrayType = clashCheck;
                         }
                     }
                 }
+
                 parsedClass.fields.push(new ParsedField(ParsedTypes.ARRAY, arrayType, varName));
-                resultClass += '\n public List<' + arrayType + '> ' + key + 's {get; set;}';
                 break;
         }
 
     })
 
-    resultClass += '\n}\n';
 
-    subClasses.forEach(sub => {
-        resultClass += '\n\n' + sub;
-    })
+    if (!compareFields(parsedClass))
+        classPool.push(parsedClass);
 
-    classPool.push(parsedClass);
-
-    return resultClass;
+    return parsedClass;
 
 }
 
 
+parse(jsonSample, 'Sample');
+const retClasses = generate(ParseEngines.CSHARP);
 
-
-console.log(parse(jsonSample, 'Sample', 'C#'));
+console.log(retClasses);
