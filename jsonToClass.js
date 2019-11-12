@@ -53,7 +53,7 @@ const EngineCsharp = {
 
         let fieldBody = '';
         fields.forEach(field => {
-            fieldBody += `\tpublic ${EngineCsharp.getType(field)} ${ field.type !== ParsedTypes.ARRAY ? checkSnakeCase(field.name, true) : checkSnakeCase(arrayName(field.name), true)}  {get; set;}\n`;
+            fieldBody += `\tpublic ${EngineCsharp.getType(field)} ${field.type !== ParsedTypes.ARRAY ? checkSnakeCase(field.name, true) : checkSnakeCase(arrayName(field.name), true)}  {get; set;}\n`;
         })
 
         return fieldBody;
@@ -111,7 +111,7 @@ const classPool = [];
 const compareFields = (targetClass) => {
 
     let res = '';
-    
+
     const comp = targetClass.fields.map(f => f.toComparableString());
     classPool.forEach(c => {
         const base = c.fields.map(f => f.toComparableString());
@@ -125,9 +125,9 @@ const compareFields = (targetClass) => {
 
 const generate = (engine) => {
     let generated = '';
-
+    const buildEngine = getEngine(engine);
     classPool.forEach(c => {
-        generated += c.build(engine);
+        generated += c.build(buildEngine);
     });
 
     return generated;
@@ -142,7 +142,7 @@ class ParsedClass {
 
     // TODO refac, if a class arealdy exists 
     build(engine) {
-        const buildEngine = getEngine(engine);
+        
         let resultClass = '';
 
         resultClass += buildEngine.classHeader(this.className);
