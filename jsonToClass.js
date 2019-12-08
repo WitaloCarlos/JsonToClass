@@ -1,3 +1,4 @@
+let classPool = [];
 const jsonSample = {
     typeA: "a",
     typeB: 123,
@@ -43,6 +44,121 @@ class ParsedField {
     toComparableString() {
         return `-${this.name.toLowerCase()}-${this.type.toLowerCase()}-${this.innerType ? this.innerType.toLowerCase() : ParsedTypes.NONE}-`;
     }
+}
+
+const EngineTypescript = {
+    classHeader: (className) => {
+        return 'export class ' + className + ' {\n\n';
+    },
+    classFields: (fields) => {
+
+        let fieldBody = '';
+        fields.forEach(field => {
+            fieldBody += `\t ${field.type !== ParsedTypes.ARRAY ? checkSnakeCase(field.name, false) : checkSnakeCase(arrayName(field.name), false)}: ${EngineTypescript.getType(field)};\n`;
+        })
+
+        return fieldBody;
+    },
+    classBottom: () => {
+        return '\n}\n\n';
+    },
+    getType: (field) => {
+
+        let resType = '';
+
+        switch (field.type) {
+
+            default:
+            case ParsedTypes.CHAR:
+            case ParsedTypes.STRING:
+                resType = 'string'
+                break;
+            case ParsedTypes.BOOLEAN:
+                resType = 'boolean'
+                break;
+            case ParsedTypes.DATE:
+                resType = 'Date'
+                break;
+            case ParsedTypes.FLOAT:
+            case ParsedTypes.LONG:
+            case ParsedTypes.INTEGER:
+            case ParsedTypes.DOUBLE:
+                resType = 'number'
+                break;
+            case ParsedTypes.NONE:
+                resType = field.innerType;
+                break;
+            case ParsedTypes.ARRAY:
+                resType = `${field.innerType}[]`
+                break;
+
+        }
+
+        return resType;
+
+    }
+}
+
+const EngineCsharpWrapper = {
+    classHeader: (className) => {
+        return 'public class ' + className + ' {\n\n';
+    },
+    classFields: (fields) => {
+
+        let fieldBody = '';
+        fields.forEach(field => {
+            fieldBody += `\tpublic ${EngineCsharpWrapper.getType(field)} ${field.type !== ParsedTypes.ARRAY ? checkSnakeCase(field.name, true) : checkSnakeCase(arrayName(field.name), true)}  {get; set;}\n`;
+        })
+
+        return fieldBody;
+    },
+    classBottom: () => {
+        return '\n}\n\n';
+    },
+    getType: (field) => {
+
+        let resType = '';
+
+        switch (field.type) {
+
+            default:
+            case ParsedTypes.STRING:
+                resType = 'String'
+                break;
+            case ParsedTypes.BOOLEAN:
+                resType = 'Boolean'
+                break;
+            case ParsedTypes.CHAR:
+                resType = 'Char'
+                break;
+            case ParsedTypes.DATE:
+                resType = 'Date'
+                break;
+            case ParsedTypes.DOUBLE:
+                resType = 'Double'
+                break;
+            case ParsedTypes.FLOAT:
+                resType = 'Single'
+                break;
+            case ParsedTypes.LONG:
+                resType = 'Int64'
+                break;
+            case ParsedTypes.INTEGER:
+                resType = 'Int32'
+                break;
+            case ParsedTypes.NONE:
+                resType = field.innerType;
+                break;
+            case ParsedTypes.ARRAY:
+                resType = `List<${field.innerType}>`
+                break;
+
+        }
+
+        return resType;
+
+    }
+
 }
 
 const EngineCsharp = {
@@ -107,7 +223,7 @@ const EngineCsharp = {
 
 }
 
-const classPool = [];
+
 const compareFields = (targetClass) => {
 
     let res = '';
@@ -126,6 +242,7 @@ const compareFields = (targetClass) => {
 const generate = (engine) => {
     let generated = '';
     const buildEngine = getEngine(engine);
+    console.log(buildEngine);
     classPool.forEach(c => {
         generated += c.build(buildEngine);
     });
@@ -142,12 +259,12 @@ class ParsedClass {
 
     // TODO refac, if a class arealdy exists 
     build(engine) {
-        
+
         let resultClass = '';
 
-        resultClass += buildEngine.classHeader(this.className);
-        resultClass += buildEngine.classFields(this.fields);
-        resultClass += buildEngine.classBottom();
+        resultClass += engine.classHeader(this.className);
+        resultClass += engine.classFields(this.fields);
+        resultClass += engine.classBottom();
 
 
         return resultClass;
@@ -158,10 +275,13 @@ class ParsedClass {
 
 const getEngine = (engine) => {
 
-
     switch (engine) {
-        default:
+        case ParseEngines.CSHARP_WRAPPER:
+            return EngineCsharpWrapper;
+        case ParseEngines.TYPESCRIPT:
+            return EngineTypescript;
         case ParseEngines.CSHARP:
+        default:
             return EngineCsharp;
     }
 
@@ -210,6 +330,19 @@ const isSubClassClash = (subClasses, newClass) => {
 
 
 const parse = (jsonTarget, resultClassName) => {
+
+    if (!resultClassName) {
+        resultClassName = 'ParsedClassObject';
+    }
+
+    if (Array.isArray(jsonTarget)) {
+        if (jsonTarget.length > 0) {
+            return parse(jsonTarget[0], resultClassName);
+        } else {
+            throw new Error('The array is empty');
+        }
+    }
+
     const parsedClass = new ParsedClass();
     parsedClass.className = checkSnakeCase(resultClassName, true);
 
@@ -218,7 +351,7 @@ const parse = (jsonTarget, resultClassName) => {
         let val = typeof jsonTarget[key];
         const varVal = jsonTarget[key];
 
-        if (val === 'object' && typeof varVal.getMonth === 'function') {
+        if ((val === 'object' && varVal) && typeof varVal.getMonth === 'function') {
             val = 'date';
         }
 
@@ -263,29 +396,33 @@ const parse = (jsonTarget, resultClassName) => {
                 break;
             case 'object':
 
-                const newElement = parse(jsonTarget[key], key);
-                const clashCheck = compareFields(newElement);
-                let fieldType = newElement.className;
-
-                if (!clashCheck) {
-                    classPool.push(newElement);
+                if (!jsonTarget[key]) {
+                    parsedClass.fields.push(new ParsedField(ParsedTypes.STRING, ParsedTypes.NONE, varName));
                 } else {
-                    fieldType = clashCheck;
-                }
+                    const newElement = parse(jsonTarget[key], key);
+                    const clashCheck = compareFields(newElement);
+                    let fieldType = newElement.className;
 
-                parsedClass.fields.push(new ParsedField(ParsedTypes.NONE, fieldType, varName));
+                    if (!clashCheck) {
+                        classPool.push(newElement);
+                    } else {
+                        fieldType = clashCheck;
+                    }
+
+                    parsedClass.fields.push(new ParsedField(ParsedTypes.NONE, fieldType, varName));
+                }
                 break;
             case 'array':
 
-                let arrayType = 'string';
+                let arrayType = ParsedTypes.STRING;
 
                 if (jsonTarget[key].length > 0) {
 
                     arrayType = typeof jsonTarget[key][0];
 
-                    if (val === 'object' && typeof jsonTarget[key].getMonth === 'function') {
+                    if ((val === 'object' && jsonTarget[key]) && typeof jsonTarget[key].getMonth === 'function') {
 
-                        arrayType = 'Date';
+                        arrayType = ParsedTypes.DATE;
 
                     } else if (arrayType == 'object') {
                         const newElement = parse(jsonTarget[key][0], arrayType);
@@ -313,8 +450,12 @@ const parse = (jsonTarget, resultClassName) => {
 
 }
 
+const resetPool = () => {
+    classPool = [];
+}
 
-parse(jsonSample, 'Sample');
-const retClasses = generate(ParseEngines.CSHARP);
 
-console.log(retClasses);
+// parse(jsonSample, 'Sample');
+// const retClasses = generate(ParseEngines.CSHARP);
+
+// console.log(retClasses);

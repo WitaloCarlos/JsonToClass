@@ -1,0 +1,31 @@
+<html>
+
+<head>
+    <title>JSON to Class</title>
+    <script src="./jsonToClass.js" type="text/javascript"></script>
+    <link rel="stylesheet" href="./test.css" type="text/css" />
+</head>
+
+<h1>Json to Class</h1>
+
+<div>
+    <div>
+        <input type="text" id="className">
+        <select name="engine" id="buildEngine">
+            <option value="csharp">C#</option>
+            <option value="csharp_w">C# (Wrapper)</option>
+            <option value="typescript">Typescript</option>
+            <option value="javascript">JavaScript</option>
+        </select>
+    </div>
+    <div>
+        <textarea name="txtRaw" id="txtRawJson" rows="20" cols="50"></textarea>
+    </div>
+    <button id="btnGenerate">Generate</button>
+    <button id="btnClear">Clear</button>
+</div>
+
+<div id="divResults"></div>
+<script src="./test.js" type="text/javascript"></script>
+
+</html>
